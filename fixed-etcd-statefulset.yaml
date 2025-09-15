@@ -1,0 +1,213 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd-cluster
+  namespace: csi-mount-test
+  labels:
+    app: etcd
+    component: database
+spec:
+  serviceName: etcd-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        fsGroup: 2000
+      initContainers:
+      - name: fix-permissions
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /var/lib/etcd/data
+          chmod 755 /var/lib/etcd
+          chmod 755 /var/lib/etcd/data
+          chown -R 2000:2000 /var/lib/etcd
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: etcd-data
+          mountPath: /var/lib/etcd
+      containers:
+      - name: etcd
+        image: artifactory.netskope.io/pe-docker/etcd-csi-test:v0.0.1
+        securityContext:
+          runAsUser: 2000
+          runAsGroup: 2000
+          allowPrivilegeEscalation: false
+        ports:
+        - name: client
+          containerPort: 2379
+          protocol: TCP
+        - name: peer
+          containerPort: 2380
+          protocol: TCP
+        env:
+        - name: ETCD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ETCD_DATA_DIR
+          value: /var/lib/etcd/data
+        - name: ETCD_LISTEN_CLIENT_URLS
+          value: "http://0.0.0.0:2379"
+        - name: ETCD_LISTEN_PEER_URLS
+          value: "http://0.0.0.0:2380"
+        - name: ETCD_ADVERTISE_CLIENT_URLS
+          value: "http://$(ETCD_NAME).etcd-headless:2379"
+        - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+          value: "http://$(ETCD_NAME).etcd-headless:2380"
+        - name: ETCD_INITIAL_CLUSTER_TOKEN
+          value: "etcd-cluster-1"
+        - name: ETCD_INITIAL_CLUSTER
+          value: "etcd-cluster-0=http://etcd-cluster-0.etcd-headless:2380,etcd-cluster-1=http://etcd-cluster-1.etcd-headless:2380,etcd-cluster-2=http://etcd-cluster-2.etcd-headless:2380"
+        - name: ETCD_INITIAL_CLUSTER_STATE
+          value: "new"
+        - name: ETCD_AUTO_COMPACTION_RETENTION
+          value: "1"
+        - name: ROLLING_RESTART_TRIGGER
+          value: "heavy-load-test-1726429740"
+        command:
+        - etcd
+        - --log-level=info
+        - --logger=zap
+        - --log-outputs=stderr
+        volumeMounts:
+        - name: etcd-data
+          mountPath: /var/lib/etcd
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        # Use a simple readiness probe that always succeeds to ensure DNS records
+        # Rolling restart test with heavy load - stress test CSI volumes
+        readinessProbe:
+          exec:
+            command:
+            - /bin/true
+          initialDelaySeconds: 1
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 2379
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "$(date): etcd preStop hook starting..."
+
+                # Gracefully stop etcd processes
+                echo "$(date): Stopping etcd processes..."
+                pkill -TERM etcd || true
+                sleep 5
+
+                # Force close any file descriptors to the data volume
+                echo "$(date): Closing file handles to data volume..."
+                lsof +f -- /var/lib/etcd 2>/dev/null | awk 'NR>1 {print $2}' | sort -u | while read pid; do
+                  kill -TERM "$pid" 2>/dev/null || true
+                done
+                sleep 3
+
+                # Sync filesystem
+                echo "$(date): Syncing filesystem..."
+                sync; sync; sync
+
+                # Give CSI driver time to detect clean state
+                echo "$(date): Waiting for CSI volume cleanup (30 seconds)..."
+                sleep 30
+
+                echo "$(date): etcd preStop hook completed"
+      - name: data-generator
+        image: artifactory.netskope.io/pe-docker/ns-ubuntu-2004-fips:latest
+        securityContext:
+          runAsUser: 2000
+          runAsGroup: 2000
+          allowPrivilegeEscalation: false
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Update sources and install etcd client
+          sed -i 's/artifactory-prod/artifactory-rd/' /etc/apt/sources.list.d/*.list
+          apt-get update && apt-get install -y curl
+
+          # Wait for etcd to be ready
+          echo "Waiting for etcd to be ready..."
+          while ! curl -sf http://localhost:2379/health; do
+            sleep 2
+          done
+          echo "etcd is ready, starting data generation..."
+
+          # Continuous data generation to stress CSI volume
+          counter=1
+          while true; do
+            # Write bulk data to etcd
+            for i in $(seq 1 10); do
+              key="bulk-data-${HOSTNAME}-${counter}-${i}"
+              # Create 1KB values
+              value=$(head -c 1024 /dev/urandom | base64 -w 0)
+              curl -sf -X PUT "http://localhost:2379/v2/keys/${key}" -d "value=${value}" >/dev/null 2>&1 || true
+            done
+
+            # Write frequent small updates
+            for i in $(seq 1 50); do
+              key="frequent-${HOSTNAME}-${i}"
+              value="timestamp-$(date +%s.%N)-counter-${counter}"
+              curl -sf -X PUT "http://localhost:2379/v2/keys/${key}" -d "value=${value}" >/dev/null 2>&1 || true
+            done
+
+            # Write some larger entries (10KB each)
+            for i in $(seq 1 3); do
+              key="large-data-${HOSTNAME}-${counter}-${i}"
+              value=$(head -c 10240 /dev/urandom | base64 -w 0)
+              curl -sf -X PUT "http://localhost:2379/v2/keys/${key}" -d "value=${value}" >/dev/null 2>&1 || true
+            done
+
+            counter=$((counter + 1))
+
+            # Status report every 100 iterations
+            if [ $((counter % 100)) -eq 0 ]; then
+              echo "$(date): Generated ${counter} data cycles for ${HOSTNAME}"
+              # Check etcd data directory size
+              du -sh /var/lib/etcd 2>/dev/null || true
+            fi
+
+            sleep 1
+          done
+        volumeMounts:
+        - name: etcd-data
+          mountPath: /var/lib/etcd
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+  volumeClaimTemplates:
+  - metadata:
+      name: etcd-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: csi-cinder-sc-delete
+      resources:
+        requests:
+          storage: 8Gi
