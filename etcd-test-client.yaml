@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etcd-test-client
+  namespace: csi-mount-test
+  labels:
+    app: etcd-test-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: etcd-test-client
+  template:
+    metadata:
+      labels:
+        app: etcd-test-client
+    spec:
+      containers:
+      - name: etcd-client
+        image: artifactory.netskope.io/pe-docker/ns-ubuntu-2004-fips:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Install etcd client tools
+          sed -i 's/artifactory-prod/artifactory-rd/' /etc/apt/sources.list.d/*.list
+          apt-get update && apt-get install -y curl jq
+          
+          echo "etcd Test Client Started"
+          echo "Available commands:"
+          echo "  - etcdctl: etcd v3 API client"
+          echo "  - curl: Direct HTTP API access"
+          echo ""
+          echo "Example commands:"
+          echo "  # Check cluster health"
+          echo "  curl http://etcd-client.csi-mount-test.svc.cluster.local:2379/health"
+          echo ""
+          echo "  # List all keys"
+          echo "  curl http://etcd-client.csi-mount-test.svc.cluster.local:2379/v2/keys?recursive=true"
+          echo ""
+          echo "  # Get stats"
+          echo "  curl http://etcd-client.csi-mount-test.svc.cluster.local:2379/v2/stats/store | jq"
+          echo ""
+          echo "  # Force rolling update test:"
+          echo "  kubectl rollout restart statefulset etcd-cluster -n csi-mount-test"
+          
+          # Keep container running and provide monitoring
+          while true; do
+            echo "=== $(date) ==="
+            echo "Cluster Health:"
+            curl -sf http://etcd-client.csi-mount-test.svc.cluster.local:2379/health || echo "Health check failed"
+            
+            echo -e "\nCluster Stats:"
+            curl -sf http://etcd-client.csi-mount-test.svc.cluster.local:2379/v2/stats/store | jq -r '.getsSuccess, .setSuccess, .watchers' 2>/dev/null || echo "Stats unavailable"
+            
+            echo -e "\nKey Count (sample):"
+            curl -sf "http://etcd-client.csi-mount-test.svc.cluster.local:2379/v2/keys?recursive=true" | jq -r '.node.nodes | length' 2>/dev/null || echo "Key count unavailable"
+            
+            echo -e "\n--- Sleeping 30 seconds ---\n"
+            sleep 30
+          done
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"

@@ -1,0 +1,40 @@
+ARG artifactory_endpoint
+FROM artifactory.netskope.io/pe-docker/ns-ubuntu-2004-fips:latest
+
+RUN sed -i 's/artifactory-prod/artifactory-rd/' /etc/apt/sources.list.d/*.list
+
+# Update package list and install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install etcd
+ENV ETCD_VER=v3.5.9
+ENV DOWNLOAD_URL=https://github.com/etcd-io/etcd/releases/download
+
+RUN wget ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz \
+    && tar xzf etcd-${ETCD_VER}-linux-amd64.tar.gz \
+    && mv etcd-${ETCD_VER}-linux-amd64/etcd /usr/local/bin/ \
+    && mv etcd-${ETCD_VER}-linux-amd64/etcdctl /usr/local/bin/ \
+    && rm -rf etcd-${ETCD_VER}-linux-amd64* \
+    && chmod +x /usr/local/bin/etcd /usr/local/bin/etcdctl
+
+# Create etcd user and data directory
+RUN groupadd --gid 1000 etcd \
+    && useradd --uid 1000 --gid etcd --shell /bin/bash --create-home etcd \
+    && mkdir -p /var/lib/etcd \
+    && chown -R etcd:etcd /var/lib/etcd
+
+# Expose etcd ports
+EXPOSE 2379 2380
+
+# Switch to etcd user
+USER etcd
+
+# Default data directory
+ENV ETCD_DATA_DIR=/var/lib/etcd
+
+# Default entrypoint
+ENTRYPOINT ["/usr/local/bin/etcd"]

@@ -1,0 +1,25 @@
+# Docker build artifacts
+*.tar.gz
+etcd-v*-linux-amd64/
+
+# Kubernetes secrets and configs
+*.kubeconfig
+*.pem
+*.key
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+dist/
+build/
