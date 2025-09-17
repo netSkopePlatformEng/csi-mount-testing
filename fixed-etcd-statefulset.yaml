@@ -9,7 +9,11 @@ metadata:
 spec:
   serviceName: etcd-headless
   replicas: 3
-  podManagementPolicy: Parallel
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: etcd
@@ -17,6 +21,8 @@ spec:
     metadata:
       labels:
         app: etcd
+      annotations:
+        rolling-restart-trigger: "rolling-update-test-1"
     spec:
       terminationGracePeriodSeconds: 300
       securityContext:
@@ -75,7 +81,7 @@ spec:
         - name: ETCD_AUTO_COMPACTION_RETENTION
           value: "1"
         - name: ROLLING_RESTART_TRIGGER
-          value: "heavy-load-test-1726429740"
+          value: "rolling-update-test-1757972031"
         command:
         - etcd
         - --log-level=info

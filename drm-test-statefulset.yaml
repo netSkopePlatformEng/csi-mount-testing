@@ -1,0 +1,275 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  annotations:
+    app.netskope.io/deployed-by: u-3npznjkjzl
+  labels:
+    app.kubernetes.io/instance: drm-test-data-service
+    app.kubernetes.io/managed-by: kubectl
+    app.kubernetes.io/name: drm-test-data-service
+    app.kubernetes.io/version: 25.1255.1
+    helm.sh/chart: drm-test-data-service-25.1255.1
+  name: drm-test-data-service
+  namespace: drm-test
+spec:
+  podManagementPolicy: Parallel
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: drm-test-data-service
+      app.kubernetes.io/name: drm-test-data-service
+  serviceName: drm-test
+  template:
+    metadata:
+      annotations:
+        observability: drm-test
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8080"
+        prometheus.io/scrape: "true"
+        vault.hashicorp.com/agent-cache-enable: "true"
+        vault.hashicorp.com/agent-cache-listener-port: "8200"
+        vault.hashicorp.com/agent-cache-use-auto-auth-token: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-inject-secret-drm_vault_gdrive_keys.cfg: secrets/generic/global/unified-auth/services/drm/gdrive_keys
+        vault.hashicorp.com/agent-inject-secret-drm_vault_instance_key.cfg: secrets/generic/global/unified-auth/services/drm/instance_key
+        vault.hashicorp.com/agent-inject-secret-drm_vault_mip_keys.cfg: secrets/generic/global/unified-auth/services/drm/mip_keys
+        vault.hashicorp.com/agent-inject-template-drm_vault_gdrive_keys.cfg: |
+          {{- with secret "secrets/generic/global/unified-auth/services/drm/gdrive_keys" -}} {{- with .Data.data }}{{- toJSONPretty . }}{{- end }} {{- end }}
+        vault.hashicorp.com/agent-inject-template-drm_vault_instance_key.cfg: |
+          {{- with secret "secrets/generic/global/unified-auth/services/drm/instance_key" -}}
+          {
+          "ua_decryption_key" : "{{ .Data.data.key }}"
+          }
+          {{- end -}}
+        vault.hashicorp.com/agent-inject-template-drm_vault_mip_keys.cfg: |
+          {{- with secret "secrets/generic/global/unified-auth/services/drm/mip_keys" -}}
+          {
+          "app_id" : "{{ .Data.data.client_id }}"
+          }
+          {{- end -}}
+        vault.hashicorp.com/agent-limits-cpu: 100m
+        vault.hashicorp.com/agent-limits-mem: 256Mi
+        vault.hashicorp.com/agent-pre-populate-only: "false"
+        vault.hashicorp.com/agent-requests-cpu: 100m
+        vault.hashicorp.com/agent-requests-mem: 128Mi
+        vault.hashicorp.com/namespace: nonprod
+        vault.hashicorp.com/role: drm
+      labels:
+        app.kubernetes.io/instance: drm-test-data-service
+        app.kubernetes.io/managed-by: kubectl
+        app.kubernetes.io/name: drm-test-data-service
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - drm-test-data-service
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+      - env:
+        - name: CONTAINER_NAME
+          value: drm-test-data-service
+        - name: APP_NAME
+          value: drm-test-data-service
+        - name: APP_VERSION
+          value: 25.1255.1
+        - name: POD_IDENTIFIER
+          value: drm-test-data-service
+        - name: MY_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: STACK_NAME
+          value: stg01-mp
+        - name: VAULT_ADDR
+          value: http://127.0.0.1:8200
+        - name: VAULT_NAMESPACE
+          value: nonprod
+        - name: PORT
+          value: "8080"
+        - name: CACHE_STORAGE_TYPE
+          value: OnDisk
+        - name: LOG_LEVEL
+          value: INFO
+        - name: SDK_LOG_LEVEL
+          value: INFO
+        - name: SDK_DATA_PATH
+          value: /opt/ns/log/
+        - name: TOKEN_REFRESH_CHANNEL_SIZE
+          value: "100"
+        - name: TOKEN_REFRESH_WORKER_COUNT
+          value: "5"
+        - name: LOG_INFREQUENT_TIER_LEVEL
+          value: info
+        - name: SSL_CERT_FILE
+          value: /etc/ssl/certs/ca-certificates.crt
+        - name: DRM_MEMORY_USAGE_LIMIT
+          value: "80.00"
+        - name: DRM_CRON_SCHEDULE
+          value: 0 0 0 * * 6
+        - name: AUDIT_ENABLED_TENANTS
+          value: 11038,13299,14389,14961,15861,15862,16875,16876,16928,18787,19845,21043,21044,21861
+        - name: NS_CERT_PACKAGE
+        - name: TOKEN_REFRESH_THRESHOLD
+          value: "10"
+        - name: TOKEN_REFRESH_SLEEP
+          value: "5"
+        image: artifactory-rd.netskope.io/drm-release-service-docker/drm-data-service:25.1255.1
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /alive
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 20
+          periodSeconds: 180
+          successThreshold: 1
+          timeoutSeconds: 30
+        name: drm-test-data-service
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 20
+        resources:
+          limits:
+            cpu: "4"
+            memory: 8Gi
+          requests:
+            cpu: "2"
+            memory: 4Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /opt/ns/common
+          name: drm-configmap-common
+        - mountPath: /opt/ns/common/drm
+          name: drm-configmap
+        - mountPath: /opt/ns/common/remote
+          name: drm-data-configmap-remote
+        - mountPath: /opt/ns/tenant
+          name: opt-ns-tenant-volume
+          readOnly: true
+        - mountPath: /opt/ns/log/
+          name: pv
+      initContainers:
+      - env:
+        - name: TEST_TENANT_ID
+        - name: TEST_MIP_INSTANCE
+        - name: CONTAINER_NAME
+          value: drm-test-data-service-init
+        - name: APP_NAME
+          value: drm-test-data-service-init
+        - name: APP_VERSION
+          value: 25.1255.1
+        - name: POD_IDENTIFIER
+          value: drm-test-data-service
+        - name: MY_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: STACK_NAME
+          value: stg01-mp
+        - name: VAULT_ADDR
+          value: http://127.0.0.1:8200
+        - name: VAULT_NAMESPACE
+          value: nonprod
+        - name: CACHE_STORAGE_TYPE
+          value: OnDisk
+        - name: LOG_LEVEL
+          value: INFO
+        - name: SDK_LOG_LEVEL
+          value: INFO
+        - name: SDK_DATA_PATH
+          value: /opt/ns/log/
+        - name: LOG_INFREQUENT_TIER_LEVEL
+          value: info
+        - name: SSL_CERT_FILE
+          value: /etc/ssl/certs/ca-certificates.crt
+        - name: AUDIT_ENABLED_TENANTS
+          value: 11038,13299,14389,14961,15861,15862,16875,16876,16928,18787,19845,21043,21044,21861
+        - name: NS_CERT_PACKAGE
+        image: artifactory-rd.netskope.io/drm-release-service-docker/drm-data-service-init:25.1255.1
+        imagePullPolicy: Always
+        name: drm-test-data-init
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /opt/ns/common
+          name: drm-configmap-common
+        - mountPath: /opt/ns/common/drm
+          name: drm-configmap
+        - mountPath: /opt/ns/common/remote
+          name: drm-data-configmap-remote
+        - mountPath: /opt/ns/tenant
+          name: opt-ns-tenant-volume
+          readOnly: true
+        - mountPath: /opt/ns/log/
+          name: pv
+      priorityClassName: eng-priority-3000
+      securityContext:
+        fsGroup: 1000
+      serviceAccount: drm
+      serviceAccountName: drm
+      volumes:
+      - configMap:
+          name: drm-configmap
+        name: drm-configmap
+      - configMap:
+          name: drm-configmap-common
+        name: drm-configmap-common
+      - configMap:
+          name: drm-data-configmap-remote
+        name: drm-data-configmap-remote
+      - hostPath:
+          path: /mnt/config/stg01-mp/global/opt/ns/tenant
+        name: opt-ns-tenant-volume
+  updateStrategy:
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - metadata:
+      name: pv
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 4Gi
+      storageClassName: csi-cinder-sc-delete
+      volumeMode: Filesystem
