@@ -205,6 +205,61 @@ spec:
       terminationGracePeriodSeconds: 300
 ```
 
+### 4. Prevent Multi-Attach Errors with Node Scheduling Controls
+Multi-Attach errors occur when pods with ReadWriteOnce (RWO) volumes attempt to schedule on multiple nodes simultaneously. Use these strategies to prevent scheduling conflicts:
+
+#### Pod Anti-Affinity (Recommended)
+Configure StatefulSets to prevent multiple pods from scheduling on the same node:
+
+```yaml
+spec:
+  template:
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - <your-app-name>
+            topologyKey: kubernetes.io/hostname
+```
+
+#### Node Selector Constraints
+For critical workloads, use node selectors to control placement:
+
+```yaml
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: dedicated-storage
+```
+
+#### Topology Spread Constraints
+Distribute pods across failure domains while avoiding conflicts:
+
+```yaml
+spec:
+  template:
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: <your-app-name>
+```
+
+#### Benefits of Node Scheduling Controls
+- **Prevents Multi-Attach**: Ensures RWO volumes only attach to one node at a time
+- **Improves Reliability**: Reduces CSI volume attachment conflicts during rolling updates
+- **Enhances Availability**: Distributes workload across cluster nodes for better fault tolerance
+- **Reduces Manual Intervention**: Fewer stuck pods requiring manual PVC cleanup
+
 ## Post-Resolution Actions
 
 1. **Document the incident:**
