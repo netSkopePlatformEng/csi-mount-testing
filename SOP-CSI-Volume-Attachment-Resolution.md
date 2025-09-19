@@ -61,9 +61,9 @@ FailedAttachVolume: rpc error: code = NotFound desc = [ControllerPublishVolume] 
 
 ### Step 3: Safe Pod Termination
 
-1. **Force delete the stuck pod:**
+1. **Delete the stuck pod (normal termination first):**
    ```bash
-   kubectl delete pod <pod-name> -n <namespace> --force --grace-period=0
+   kubectl delete pod <pod-name> -n <namespace>
    ```
 
 2. **Wait for pod recreation:**
@@ -73,9 +73,33 @@ FailedAttachVolume: rpc error: code = NotFound desc = [ControllerPublishVolume] 
 
 3. **If pod recreates with same issue, proceed to Step 4**
 
-### Step 4: PVC Recreation (Data Loss Risk)
+### Step 4: PVC Recreation (Primary Resolution Method)
 
 ⚠️ **WARNING: This step will result in data loss. Ensure you have backups or can recreate data.**
+
+1. **Delete the problematic PVC while pod is running (StatefulSet will recreate it):**
+   ```bash
+   kubectl delete pvc <pvc-name> -n <namespace>
+   ```
+
+2. **If PVC gets stuck in Terminating state, force delete the pod:**
+   ```bash
+   kubectl delete pod <pod-name> -n <namespace> --force --grace-period=0
+   ```
+
+3. **Monitor for new PVC creation and pod recovery:**
+   ```bash
+   kubectl get pods,pvc -n <namespace> -w
+   ```
+
+4. **Verify new PVC has different volume ID:**
+   ```bash
+   kubectl get pvc <pvc-name> -n <namespace> -o yaml | grep volumeName
+   ```
+
+### Step 5: Alternative - Scale Down Method (If Direct PVC Deletion Fails)
+
+If the PVC deletion in Step 4 doesn't resolve the issue:
 
 1. **Scale down the StatefulSet:**
    ```bash
@@ -92,19 +116,14 @@ FailedAttachVolume: rpc error: code = NotFound desc = [ControllerPublishVolume] 
    kubectl delete pvc <pvc-name> -n <namespace>
    ```
 
-4. **Verify PV cleanup:**
-   ```bash
-   kubectl get pv | grep <pv-name>
-   ```
-
-5. **Scale StatefulSet back up:**
+4. **Scale StatefulSet back up:**
    ```bash
    kubectl scale statefulset <statefulset-name> -n <namespace> --replicas=<original-replica-count>
    ```
 
-### Step 5: Alternative - PVC Patch Method (Preserve Data)
+### Step 6: Data Preservation Method (Advanced - Not Tested)
 
-If data preservation is critical, attempt this method first:
+⚠️ **EXPERIMENTAL**: This method is theoretical and has not been validated in testing:
 
 1. **Get current PV name:**
    ```bash
@@ -128,7 +147,7 @@ If data preservation is critical, attempt this method first:
    kubectl patch pvc <pvc-name> -n <namespace> -p '{"spec":{"volumeName":"'$PV_NAME'"}}'
    ```
 
-### Step 6: Verification
+### Step 7: Verification
 
 1. **Monitor pod startup:**
    ```bash
@@ -205,11 +224,48 @@ spec:
 - **SRE Team**: [Contact information]
 - **Application Team**: [Contact information]
 
+## Real-World Testing Example (2025-09-19)
+
+**Environment**: stork-qa01-dp-npe-iad0-nc1
+**Namespace**: drm
+**Issue**: Pod stuck in `Init:0/2` for 2d10h
+
+### Actual Commands Used (Validated)
+```bash
+# 1. Identified the issue
+kubectl get pods -n drm
+# NAME                 READY   STATUS     RESTARTS       AGE
+# drm-data-service-1   0/2     Init:0/2   0              2d10h
+
+# 2. Examined the problem
+kubectl describe pod drm-data-service-1 -n drm
+# Events showed: FailedAttachVolume: rpc error: code = NotFound desc = [ControllerPublishVolume] Volume 9d3fa055-1b22-448a-a505-900827069e3f not found
+
+# 3. Tried simple pod deletion first (didn't work)
+kubectl delete pod drm-data-service-1 -n drm
+# Pod recreated with same issue
+
+# 4. PVC deletion (successful resolution)
+kubectl delete pvc pv-drm-data-service-1 -n drm
+# PVC stuck in Terminating state
+
+# 5. Force delete pod to break dependency
+kubectl delete pod drm-data-service-1 -n drm --force --grace-period=0
+
+# 6. Verified resolution
+kubectl get pods,pvc -n drm
+# Pod: 2/2 Running with new PVC volume ID
+```
+
+**Result**: Issue resolved in ~3 minutes after 2d10h of being stuck.
+**Key Finding**: PVC deletion is the primary effective resolution method.
+
 ## Revision History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-09-19 | Claude Code | Initial SOP creation |
+| 1.1 | 2025-09-19 | Claude Code | Updated based on real-world testing validation |
 
 ---
 
