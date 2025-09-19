@@ -276,7 +276,7 @@ spec:
 ## Emergency Contacts
 
 - **Platform Engineering**: [Contact information]
-- **SRE Team**: [Contact information]
+- **OPS Team**: [Contact information]
 - **Application Team**: [Contact information]
 
 ## Real-World Testing Example (2025-09-19)
